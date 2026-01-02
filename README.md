@@ -146,6 +146,9 @@ esac
 - `.gitattributes` enforces LF endings (important when editing over SMB).
 - If Git complains about an "unsafe repository" on your SMB/UNC path, allow it explicitly: `git config --global --add safe.directory '%(prefix)///PierHouseFiles/scripts/uploadwatcher'` (adjust the path if yours differs).
 
+## TODO
+- Embed clickable links in the SMS message so recipients can open the newly uploaded file directly. See [DIRECT_LINKS.md](DIRECT_LINKS.md) for constraints and prior attempts.
+
 ## Troubleshooting
 - No SMS: check `TEXTBELT_KEY` validity and quota; inspect log for `Raw Textbelt response`.
 - Duplicate alerts: ensure `state/` persists and is writable.
