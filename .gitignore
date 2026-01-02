@@ -4,6 +4,11 @@ logs/
 *.out
 *.err
 
+# Runtime state
+state/
+*.state
+*.rate
+
 # OS junk
 .DS_Store
 Thumbs.db

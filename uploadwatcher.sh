@@ -4,28 +4,29 @@
 # Configuration
 #############################################
 
-source "$(dirname "$0")/.env"
+BASE_DIR="$(dirname "$0")"
+source "$BASE_DIR/.env"
 
 WATCH_DIR="/volume1/Uploads"
 LOG_FILE="/var/log/uploadwatcher.log"
 
 # Textbelt API
 TEXTBELT_URL="https://textbelt.com/text"
-TEXTBELT_KEY=$TEXTBELT_KEY
+TEXTBELT_KEY="$TEXTBELT_KEY"
 
 # Recipients
-SMS_TO_NUMBERS=$SMS_TO_NUMBERS
+IFS=',' read -ra SMS_TO_NUMBERS <<< "$SMS_TO_NUMBERS"
 
 # Admin number for alerts
-ADMIN_NUMBER=$ADMIN_NUMBER
+ADMIN_NUMBER="$ADMIN_NUMBER"
 
 # Rate limiting (sliding window)
 RATE_LIMIT_MAX=20
 RATE_LIMIT_WINDOW_SECONDS=60
-RATE_LIMIT_STATE="state/uploadwatcher.rate"
+RATE_LIMIT_STATE="$BASE_DIR/state/uploadwatcher.rate"
 
 # State file to avoid duplicate notifications across restarts
-STATE_FILE="state/uploadwatcher.state"
+STATE_FILE="$BASE_DIR/state/uploadwatcher.state"
 
 #############################################
 # Logging
