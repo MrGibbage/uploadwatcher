@@ -5,17 +5,46 @@
 #############################################
 
 BASE_DIR="$(dirname "$0")"
-source "$BASE_DIR/.env"
+ENV_FILE="$BASE_DIR/.env"
+
+if [[ ! -r "$ENV_FILE" ]]; then
+    echo "Missing or unreadable .env at $ENV_FILE" >&2
+    exit 1
+fi
+
+source "$ENV_FILE"
 
 WATCH_DIR="/volume1/Uploads"
 LOG_FILE="/var/log/uploadwatcher.log"
+LOG_TO_STDOUT="${LOG_TO_STDOUT:-0}"
 
 # Textbelt API
 TEXTBELT_URL="https://textbelt.com/text"
 TEXTBELT_KEY="$TEXTBELT_KEY"
 
-# Recipients
-IFS=',' read -ra SMS_TO_NUMBERS <<< "$SMS_TO_NUMBERS"
+# Recipients (comma-separated list in .env)
+parse_recipients() {
+    local raw="$SMS_TO_NUMBERS"
+    SMS_RECIPIENTS=()
+
+    if [[ -z "$raw" ]]; then
+        log "WARN" "SMS_TO_NUMBERS is empty; no SMS will be sent"
+        return
+    fi
+
+    IFS=',' read -ra SMS_RECIPIENTS <<< "$raw"
+
+    # Trim whitespace and drop empties
+    local cleaned=()
+    for num in "${SMS_RECIPIENTS[@]}"; do
+        # ltrim
+        num="${num#${num%%[![:space:]]*}}"
+        # rtrim
+        num="${num%${num##*[![:space:]]}}"
+        [[ -n "$num" ]] && cleaned+=("$num")
+    done
+    SMS_RECIPIENTS=("${cleaned[@]}")
+}
 
 # Admin number for alerts
 ADMIN_NUMBER="$ADMIN_NUMBER"
@@ -37,7 +66,11 @@ log() {
     local msg="$*"
     local ts
     ts="$(date '+%Y-%m-%d %H:%M:%S')"
-    echo "[$ts] [$level] $msg" | tee -a "$LOG_FILE"
+    local line="[$ts] [$level] $msg"
+    echo "$line" >> "$LOG_FILE"
+    if [[ "$LOG_TO_STDOUT" == "1" ]]; then
+        echo "$line"
+    fi
 }
 
 #############################################
@@ -45,9 +78,26 @@ log() {
 #############################################
 
 ensure_files() {
+    mkdir -p "$(dirname "$STATE_FILE")"
+    mkdir -p "$(dirname "$RATE_LIMIT_STATE")"
+    mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+
     touch "$STATE_FILE"
     touch "$LOG_FILE"
     touch "$RATE_LIMIT_STATE"
+}
+
+validate_config() {
+    local missing=()
+
+    [[ -z "$TEXTBELT_KEY" ]] && missing+=("TEXTBELT_KEY")
+    [[ -z "$ADMIN_NUMBER" ]] && missing+=("ADMIN_NUMBER")
+    [[ -z "$WATCH_DIR" ]] && missing+=("WATCH_DIR")
+
+    if (( ${#missing[@]} > 0 )); then
+        echo "Missing required config: ${missing[*]}" >&2
+        exit 1
+    fi
 }
 
 #############################################
@@ -116,12 +166,17 @@ send_admin_alert() {
 send_sms() {
     local message="$1"
 
+    if (( ${#SMS_RECIPIENTS[@]} == 0 )); then
+        log "WARN" "No recipients configured; skipping SMS send"
+        return 0
+    fi
+
     if ! rate_allow; then
         log "WARN" "Rate limit exceeded; skipping SMS: $message"
         return 0
     fi
 
-    for number in "${SMS_TO_NUMBERS[@]}"; do
+    for number in "${SMS_RECIPIENTS[@]}"; do
 
         RESPONSE=$(curl -s -X POST "$TEXTBELT_URL" \
             --data-urlencode phone="$number" \
@@ -148,7 +203,14 @@ send_sms() {
 #############################################
 
 start_watcher() {
+    if ! command -v inotifywait >/dev/null 2>&1; then
+        echo "inotifywait is required but not found in PATH" >&2
+        exit 1
+    fi
+
+    validate_config
     ensure_files
+    parse_recipients
     log "INFO" "UploadWatcher started on $WATCH_DIR"
 
     # Use moved_to because Synology finalizes uploads with MOVED_TO

@@ -19,19 +19,17 @@ Create a `.env` alongside the script. Example:
 ```bash
 TEXTBELT_KEY=your_textbelt_key
 ADMIN_NUMBER=+15551234567
-# Bash array syntax for multiple recipients
-SMS_TO_NUMBERS=(+15550001111 +15550002222)
+# Comma-separated list for multiple recipients
+SMS_TO_NUMBERS=+15550001111,+15550002222
 ```
 
 Defaults in `uploadwatcher.sh`:
 - `WATCH_DIR="/volume1/Uploads"`
 - `LOG_FILE="/var/log/uploadwatcher.log"`
-- State + rate limit files under `state/` (relative to the script directory).
-- Rate limit: 20 messages per 60 seconds.
+- Set `LOG_TO_STDOUT=1` in `.env` if you want logs echoed to the console in addition to the log file. Default is 0 to avoid double-logging when the service wraps the script with its own logging/tee.
+ 
+ 
 
-Ensure the `state/` directory exists and is writable by the user running the script.
-
-## Running manually
 ```bash
 bash uploadwatcher.sh
 ```
@@ -58,6 +56,90 @@ Run under a service manager (systemd example):
 3) `sudo systemctl enable --now uploadwatcher`
 
 Adjust paths and user as needed for your Synology setup.
+
+### Synology rc.d example
+Place at `/usr/local/etc/rc.d/S99uploadwatcher.sh` (make executable):
+```sh
+#!/bin/sh
+
+### BEGIN INIT INFO
+# Provides:          uploadwatcher
+# Required-Start:    $network
+# Required-Stop:
+# Default-Start:     2 3 4 5
+# Default-Stop:
+# Short-Description: Upload Watcher Service
+### END INIT INFO
+
+DAEMON="/volume1/scripts/uploadwatcher/uploadwatcher.sh"
+WORKDIR="/volume1/scripts/uploadwatcher"
+PIDFILE="/var/run/uploadwatcher.pid"
+LOGFILE="/var/log/uploadwatcher.log"
+
+start() {
+   echo "Starting uploadwatcher..."
+
+   if [ ! -d "$WORKDIR" ]; then
+      echo "Workdir $WORKDIR not found" >&2
+      exit 1
+   fi
+
+   cd "$WORKDIR" || exit 1
+   mkdir -p "$(dirname "$PIDFILE")"
+   mkdir -p "$(dirname "$LOGFILE")" 2>/dev/null || true
+   : > "$LOGFILE"
+
+   if [ -f "$PIDFILE" ]; then
+      PGID=$(cat "$PIDFILE")
+      if [ -n "$PGID" ] && kill -0 -"$PGID" 2>/dev/null; then
+         echo "Already running."
+         exit 0
+      fi
+   fi
+
+   LOG_TO_STDOUT=0 nohup "$DAEMON" >> "$LOGFILE" 2>&1 &
+   DAEMON_PID=$!
+   PGID=$(ps -o pgid= "$DAEMON_PID" | tr -d ' ')
+   echo "$PGID" > "$PIDFILE"
+   echo "Started with PGID $PGID"
+}
+
+stop() {
+   echo "Stopping uploadwatcher..."
+
+   if [ -f "$PIDFILE" ]; then
+      PGID=$(cat "$PIDFILE")
+      if [ -n "$PGID" ]; then
+         kill -TERM -"$PGID" 2>/dev/null
+         sleep 1
+         kill -KILL -"$PGID" 2>/dev/null
+      fi
+      rm -f "$PIDFILE"
+      echo "Stopped."
+   else
+      echo "Not running."
+   fi
+}
+
+status() {
+   if [ -f "$PIDFILE" ]; then
+      PGID=$(cat "$PIDFILE")
+      if kill -0 -"$PGID" 2>/dev/null; then
+         echo "uploadwatcher is running (PGID $PGID)"
+         return
+      fi
+   fi
+   echo "uploadwatcher is not running"
+}
+
+case "$1" in
+   start) start ;;
+   stop) stop ;;
+   restart) stop; sleep 1; start ;;
+   status) status ;;
+   *) echo "Usage: $0 {start|stop|restart|status}" ;;
+esac
+```
 
 ## Git hygiene
 - `.gitignore` already excludes `.env`, logs, and common junk.
